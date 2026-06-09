@@ -13,10 +13,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// ---- Raw body capture for proxy ----
-// Important: do NOT use express.json() – that would consume the stream.
-// We'll just let the proxy pipe the request body as-is.
-
 const nimTarget = 'https://integrate.api.nvidia.com';
 
 const proxy = createProxyMiddleware({
@@ -24,10 +20,10 @@ const proxy = createProxyMiddleware({
   changeOrigin: true,
   on: {
     proxyReq: (proxyReq, req, res) => {
-      // Log the outgoing URL for debugging
+      // Log outgoing URL
       console.log('→ Proxying to:', nimTarget + req.url);
 
-      // Forward headers
+      // Forward necessary headers
       if (req.headers.authorization) {
         proxyReq.setHeader('Authorization', req.headers.authorization);
       }
@@ -35,7 +31,7 @@ const proxy = createProxyMiddleware({
         proxyReq.setHeader('Content-Type', req.headers['content-type']);
       }
 
-      // If the body has been partially consumed, re-send it
+      // If body was parsed by Express (not using express.json() here, but just in case)
       if (req.body) {
         const bodyData = JSON.stringify(req.body);
         proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
@@ -45,13 +41,28 @@ const proxy = createProxyMiddleware({
     },
     proxyRes: (proxyRes, req, res) => {
       console.log('← Response status:', proxyRes.statusCode);
-      // CORS on response
+
+      // CORS headers on response
       proxyRes.headers['access-control-allow-origin'] = '*';
       proxyRes.headers['access-control-allow-headers'] = 'Authorization, Content-Type';
+
+      // ---- NEW: capture the body on error responses ----
+      if (proxyRes.statusCode >= 400) {
+        let body = '';
+        proxyRes.on('data', (chunk) => {
+          body += chunk.toString();
+        });
+        proxyRes.on('end', () => {
+          console.error('NVIDIA error body:', body);
+        });
+      }
     },
     error: (err, req, res) => {
       console.error('Proxy error:', err.message);
-      res.status(500).send('Proxy error');
+      if (!res.headersSent) {
+        res.writeHead(504, { 'Content-Type': 'text/plain' });
+        res.end('Proxy error: ' + err.message);
+      }
     },
   },
 });
