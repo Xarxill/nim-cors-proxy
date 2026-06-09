@@ -18,8 +18,6 @@ const nimTarget = 'https://integrate.api.nvidia.com';
 const proxy = createProxyMiddleware({
   target: nimTarget,
   changeOrigin: true,
-  // Disable buffering, forward stream as-is
-  selfHandleResponse: false,  // keep default
   on: {
     proxyReq: (proxyReq, req, res) => {
       console.log('→ Proxying to:', nimTarget + req.url);
@@ -31,7 +29,6 @@ const proxy = createProxyMiddleware({
         proxyReq.setHeader('Content-Type', req.headers['content-type']);
       }
 
-      // If body was parsed (unlikely), re-send
       if (req.body) {
         const bodyData = JSON.stringify(req.body);
         proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
@@ -41,27 +38,16 @@ const proxy = createProxyMiddleware({
     },
     proxyRes: (proxyRes, req, res) => {
       console.log('← Response status:', proxyRes.statusCode);
-      const startTime = Date.now();
 
-      // CORS
       proxyRes.headers['access-control-allow-origin'] = '*';
       proxyRes.headers['access-control-allow-headers'] = 'Authorization, Content-Type';
 
-      // Intercept the stream to log first data arrival
-      const originalWrite = res.write.bind(res);
-      let firstChunk = true;
-      res.write = function(chunk, ...args) {
-        if (firstChunk) {
-          console.log(`→ First chunk after ${Date.now() - startTime}ms`);
-          firstChunk = false;
-        }
-        return originalWrite(chunk, ...args);
-      };
-
-      // Also log any error body
+      // Log error body for debugging
       if (proxyRes.statusCode >= 400) {
         let body = '';
-        proxyRes.on('data', (chunk) => { body += chunk.toString(); });
+        proxyRes.on('data', (chunk) => {
+          body += chunk.toString();
+        });
         proxyRes.on('end', () => {
           console.error('NVIDIA error body:', body);
         });
@@ -77,8 +63,11 @@ const proxy = createProxyMiddleware({
   },
 });
 
-// Increase server timeout to 110s to match Render's limit
-const server = app.listen(process.env.PORT || 10000, () => {
-  console.log('CORS proxy running');
-});
-server.timeout = 110000; // 110 seconds, just under Render's 100s? Actually Render's timeout is at the load balancer, we can't exceed that. This just prevents Node from closing early.
+// Quick health check endpoint
+app.get('/', (req, res) => res.send('Proxy is running'));
+
+app.use('/', proxy);
+
+const PORT = process.env.PORT || 10000;
+const server = app.listen(PORT, () => console.log(`CORS proxy running on port ${PORT}`));
+server.timeout = 0; // disable Node's internal timeout, let Render handle it
