@@ -20,7 +20,7 @@ const proxy = createProxyMiddleware({
   changeOrigin: true,
   on: {
     proxyReq: (proxyReq, req, res) => {
-      // ---- Log every request ----
+      // Log every request with timestamp
       console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
 
       // Forward required headers
@@ -31,21 +31,21 @@ const proxy = createProxyMiddleware({
         proxyReq.setHeader('Content-Type', req.headers['content-type']);
       }
 
-      // ---- Handle client disconnect (stop generation) ----
+      // ---- Abort upstream if the client disconnects ----
       const onClientClose = () => {
         console.log('⚠️ Client disconnected, aborting upstream request');
-        proxyReq.destroy(); // immediately terminate connection to NVIDIA
+        proxyReq.destroy();
       };
-      req.on('close', onClientClose);
-      req.on('aborted', onClientClose);
 
-      // Clean up listeners when proxyReq finishes to avoid memory leaks
+      // Listen for close on the *response* object (client disconnects)
+      res.on('close', onClientClose);
+
+      // Clean up listener when the proxy request finishes normally
       proxyReq.on('finish', () => {
-        req.off('close', onClientClose);
-        req.off('aborted', onClientClose);
+        res.off('close', onClientClose);
       });
 
-      // If body was parsed by Express, re-send it (unlikely, but safe)
+      // If body was parsed by Express, re-send (unlikely but safe)
       if (req.body) {
         const bodyData = JSON.stringify(req.body);
         proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
