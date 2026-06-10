@@ -20,8 +20,10 @@ const proxy = createProxyMiddleware({
   changeOrigin: true,
   on: {
     proxyReq: (proxyReq, req, res) => {
-      console.log('→ Proxying to:', nimTarget + req.url);
+      // ---- Log every request ----
+      console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
 
+      // Forward required headers
       if (req.headers.authorization) {
         proxyReq.setHeader('Authorization', req.headers.authorization);
       }
@@ -29,6 +31,21 @@ const proxy = createProxyMiddleware({
         proxyReq.setHeader('Content-Type', req.headers['content-type']);
       }
 
+      // ---- Handle client disconnect (stop generation) ----
+      const onClientClose = () => {
+        console.log('⚠️ Client disconnected, aborting upstream request');
+        proxyReq.destroy(); // immediately terminate connection to NVIDIA
+      };
+      req.on('close', onClientClose);
+      req.on('aborted', onClientClose);
+
+      // Clean up listeners when proxyReq finishes to avoid memory leaks
+      proxyReq.on('finish', () => {
+        req.off('close', onClientClose);
+        req.off('aborted', onClientClose);
+      });
+
+      // If body was parsed by Express, re-send it (unlikely, but safe)
       if (req.body) {
         const bodyData = JSON.stringify(req.body);
         proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
@@ -37,8 +54,9 @@ const proxy = createProxyMiddleware({
       }
     },
     proxyRes: (proxyRes, req, res) => {
-      console.log('← Response status:', proxyRes.statusCode);
+      console.log(`← Response status: ${proxyRes.statusCode}`);
 
+      // CORS on response
       proxyRes.headers['access-control-allow-origin'] = '*';
       proxyRes.headers['access-control-allow-headers'] = 'Authorization, Content-Type';
 
@@ -63,11 +81,13 @@ const proxy = createProxyMiddleware({
   },
 });
 
-// Quick health check endpoint
-app.get('/', (req, res) => res.send('Proxy is running'));
+// Health check
+app.get('/', (req, res) => res.send('Proxy OK'));
 
 app.use('/', proxy);
 
 const PORT = process.env.PORT || 10000;
-const server = app.listen(PORT, () => console.log(`CORS proxy running on port ${PORT}`));
-server.timeout = 0; // disable Node's internal timeout, let Render handle it
+const server = app.listen(PORT, () =>
+  console.log(`CORS proxy running on port ${PORT}`)
+);
+server.timeout = 0; // rely on Render's load balancer timeout
