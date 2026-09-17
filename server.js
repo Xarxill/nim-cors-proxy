@@ -15,19 +15,12 @@ app.use((req, res, next) => {
 
 const nimTarget = 'https://integrate.api.nvidia.com';
 
-// ---- Proxy (no truncation, full context, proper disconnect) ----
 const proxy = createProxyMiddleware({
   target: nimTarget,
   changeOrigin: true,
   on: {
     proxyReq: (proxyReq, req, res) => {
       console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-
-      // Log request body size (just for info)
-      if (req.body) {
-        const bodyString = JSON.stringify(req.body);
-        console.log(`Request body size: ${bodyString.length} bytes`);
-      }
 
       // Forward headers
       if (req.headers.authorization) {
@@ -37,7 +30,7 @@ const proxy = createProxyMiddleware({
         proxyReq.setHeader('Content-Type', req.headers['content-type']);
       }
 
-      // ---- Disconnect handling (stop generation) ----
+      // ---- Disconnect handling ----
       const onClientClose = () => {
         console.log('⚠️ Client disconnected, aborting upstream request');
         proxyReq.destroy();
@@ -45,23 +38,24 @@ const proxy = createProxyMiddleware({
       res.on('close', onClientClose);
       proxyReq.on('finish', () => res.off('close', onClientClose));
 
-      // If body was parsed by Express, re-send the full body as-is
+      // ---- Force reasoning_effort: low ----
       if (req.body) {
+        // Override whatever JanitorAI sent
+        req.body.reasoning_effort = 'low';
+
         const bodyData = JSON.stringify(req.body);
+        console.log(`Request body size: ${bodyData.length} bytes (reasoning_effort=low)`);
         proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
         proxyReq.write(bodyData);
         proxyReq.end();
       }
-      // If body not parsed (unlikely), the proxy will pipe the stream automatically
     },
     proxyRes: (proxyRes, req, res) => {
       console.log(`← Response status: ${proxyRes.statusCode}`);
 
-      // CORS on response
       proxyRes.headers['access-control-allow-origin'] = '*';
       proxyRes.headers['access-control-allow-headers'] = 'Authorization, Content-Type';
 
-      // Log error body for debugging
       if (proxyRes.statusCode >= 400) {
         let body = '';
         proxyRes.on('data', (chunk) => { body += chunk.toString(); });
@@ -78,9 +72,7 @@ const proxy = createProxyMiddleware({
   },
 });
 
-// Parse JSON body so we can log its size (no truncation)
 app.use(express.json({ limit: '5mb' }));
-
 app.get('/', (req, res) => res.send('Proxy OK'));
 app.use('/', proxy);
 
