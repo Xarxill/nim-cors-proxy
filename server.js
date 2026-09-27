@@ -77,5 +77,7 @@ app.get('/', (req, res) => res.send('Proxy OK'));
 app.use('/', proxy);
 
 const PORT = process.env.PORT || 10000;
-const server = app.listen(PORT, () => console.log(`CORS proxy running on port ${PORT}`));
+const server = app.listen(PORT, '0.0.0.0', () =>
+  console.log(`CORS proxy running on port ${PORT}`)
+);
 server.timeout = 0;
