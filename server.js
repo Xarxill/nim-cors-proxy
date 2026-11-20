@@ -38,12 +38,17 @@ const proxy = createProxyMiddleware({
       res.on('close', onClientClose);
       proxyReq.on('finish', () => res.off('close', onClientClose));
 
-      // ---- Pass body as-is (No reasoning interference) ----
+      // ---- Force Medium Reasoning for Moonshot ----
       if (req.body) {
-        // We simply stringify the body and send it exactly as JanitorAI made it.
+        // 1. Set reasoning_effort to 'medium'
+        req.body.reasoning_effort = 'medium';
+
+        // 2. Ensure thinking is explicitly enabled
+        req.body.chat_template_kwargs = req.body.chat_template_kwargs || {};
+        req.body.chat_template_kwargs.thinking = true;
+
         const bodyData = JSON.stringify(req.body);
-        console.log(`Request body size: ${bodyData.length} bytes (default reasoning)`);
-        
+        console.log(`Request body size: ${bodyData.length} bytes (forced medium reasoning)`);
         proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
         proxyReq.write(bodyData);
         proxyReq.end();
