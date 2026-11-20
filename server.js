@@ -35,35 +35,47 @@ const proxy = createProxyMiddleware({
       res.on('close', onClientClose);
       proxyReq.on('finish', () => res.off('close', onClientClose));
 
-      // ---- DYNAMIC THINKING CONTROL (NIM-COMPATIBLE) ----
+      // ---- SANITIZE THINKING EFFORT FOR NIM ----
       if (req.body) {
-        let rawModel = req.body.model || '';
-
-        // Janitor style:  moonshotai/kimi-k3.1-pro[low]
-        const effortMatch = rawModel.match(/\[(low|medium|high|max)\]/i);
-        let effort = null;
-
-        if (effortMatch) {
-          effort = effortMatch[1].toLowerCase();
-          // Strip the suffix before sending to NIM
-          req.body.model = rawModel.replace(/\[(low|medium|high|max)\]/i, '').trim();
-        } else {
-          console.log('⚠️ No [effort] suffix found – using NIM default (low)');
-        }
-
-        // NIM for Kimi K3.1 Pro accepts a top-level reasoning_effort field.
-        // Do NOT send chat_template_kwargs or a thinking object – NIM rejects them.
-        if (effort) {
-          req.body.reasoning_effort = effort;
-          console.log(`🎛️  reasoning_effort set to "${effort}" (model: ${req.body.model})`);
-        } else {
-          // Let NIM apply its own default
-          delete req.body.reasoning_effort;
-        }
-
-        // Clean up any accidental leftover fields that cause 400 errors
+        // 1. Remove any fields that NIM rejects
         delete req.body.chat_template_kwargs;
         delete req.body.thinking;
+
+        // 2. Read the effort JanitorAI sent (it may be in different cases)
+        let incomingEffort = req.body.reasoning_effort;
+        if (typeof incomingEffort === 'string') {
+          incomingEffort = incomingEffort.toLowerCase().trim();
+        }
+
+        // 3. Map Janitor's values to NIM's accepted values
+        const effortMap = {
+          'off':         'none',
+          'minimal':     'low',
+          'low':         'low',
+          'medium':      'high',   // Kimi only has low/high/max
+          'extra high':  'max',
+          'extra_high':  'max',
+          'extra-high':  'max',
+          'max':         'max',
+          'high':        'high',
+          'none':        'none'
+        };
+
+        const mappedEffort = effortMap[incomingEffort] || null;
+
+        if (mappedEffort) {
+          if (mappedEffort === 'none') {
+            // Kimi always reasons; "none" is the lowest allowed
+            req.body.reasoning_effort = 'none';
+          } else {
+            req.body.reasoning_effort = mappedEffort;
+          }
+          console.log(`🎛️  Effort "${incomingEffort}" → sent as "${req.body.reasoning_effort}"`);
+        } else {
+          // No effort field from Janitor – let NIM use its default (max)
+          delete req.body.reasoning_effort;
+          console.log('ℹ️  No reasoning_effort sent – NIM will use its default');
+        }
 
         const bodyData = JSON.stringify(req.body);
         console.log(`Request body size: ${bodyData.length} bytes`);
@@ -94,7 +106,6 @@ const proxy = createProxyMiddleware({
 });
 
 // IMPORTANT: Do NOT parse the body before the proxy.
-// The proxy rewrites req.body manually in proxyReq.
 app.get('/', (req, res) => res.send('Proxy OK'));
 app.use('/', proxy);
 
