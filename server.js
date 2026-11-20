@@ -35,41 +35,35 @@ const proxy = createProxyMiddleware({
       res.on('close', onClientClose);
       proxyReq.on('finish', () => res.off('close', onClientClose));
 
-      // ---- DYNAMIC THINKING CONTROL ----
+      // ---- DYNAMIC THINKING CONTROL (NIM-COMPATIBLE) ----
       if (req.body) {
         let rawModel = req.body.model || '';
 
         // Janitor style:  moonshotai/kimi-k3.1-pro[low]
-        const effortMatch = rawModel.match(/\[(minimal|low|medium|high|max|none)\]/i);
+        const effortMatch = rawModel.match(/\[(low|medium|high|max)\]/i);
         let effort = null;
 
         if (effortMatch) {
           effort = effortMatch[1].toLowerCase();
           // Strip the suffix before sending to NIM
-          req.body.model = rawModel.replace(/\[(minimal|low|medium|high|max|none)\]/i, '').trim();
+          req.body.model = rawModel.replace(/\[(low|medium|high|max)\]/i, '').trim();
         } else {
-          console.log('⚠️ No [effort] suffix found in model name – using NIM default');
+          console.log('⚠️ No [effort] suffix found – using NIM default (low)');
         }
 
-        // NIM Kimi uses chat_template_kwargs for thinking control.
+        // NIM for Kimi K3.1 Pro accepts a top-level reasoning_effort field.
+        // Do NOT send chat_template_kwargs or a thinking object – NIM rejects them.
         if (effort) {
-          req.body.chat_template_kwargs = req.body.chat_template_kwargs || {};
-          req.body.chat_template_kwargs.thinking = {
-            type: effort === 'none' ? 'disabled' : 'enabled',
-            effort: effort === 'none' ? undefined : effort
-          };
-
-          // Some NIM layers also read top-level reasoning_effort.
-          // Setting it here makes the translation more robust.
-          if (effort !== 'none') {
-            req.body.reasoning_effort = effort;
-          } else {
-            // Remove any stale value if thinking is disabled
-            delete req.body.reasoning_effort;
-          }
-
-          console.log(`🎛️  Effort set to "${effort}" (model sent as "${req.body.model}")`);
+          req.body.reasoning_effort = effort;
+          console.log(`🎛️  reasoning_effort set to "${effort}" (model: ${req.body.model})`);
+        } else {
+          // Let NIM apply its own default
+          delete req.body.reasoning_effort;
         }
+
+        // Clean up any accidental leftover fields that cause 400 errors
+        delete req.body.chat_template_kwargs;
+        delete req.body.thinking;
 
         const bodyData = JSON.stringify(req.body);
         console.log(`Request body size: ${bodyData.length} bytes`);
