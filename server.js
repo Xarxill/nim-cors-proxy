@@ -38,17 +38,17 @@ const proxy = createProxyMiddleware({
       res.on('close', onClientClose);
       proxyReq.on('finish', () => res.off('close', onClientClose));
 
-      // ---- Force Medium Reasoning for Moonshot ----
+      // ---- Force lowest possible thinking for Moonshot ----
       if (req.body) {
-        // 1. Set reasoning_effort to 'medium'
-        req.body.reasoning_effort = 'medium';
+        // 1. Set reasoning_effort to 'low' (NIM's minimum accepted value)
+        req.body.reasoning_effort = 'low';
 
-        // 2. Ensure thinking is explicitly enabled
+        // 2. Explicitly disable thinking via chat_template_kwargs (NIM specific)
         req.body.chat_template_kwargs = req.body.chat_template_kwargs || {};
-        req.body.chat_template_kwargs.thinking = true;
+        req.body.chat_template_kwargs.thinking = false;
 
         const bodyData = JSON.stringify(req.body);
-        console.log(`Request body size: ${bodyData.length} bytes (forced medium reasoning)`);
+        console.log(`Request body size: ${bodyData.length} bytes (forced lowest thinking)`);
         proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
         proxyReq.write(bodyData);
         proxyReq.end();
