@@ -38,17 +38,12 @@ const proxy = createProxyMiddleware({
       res.on('close', onClientClose);
       proxyReq.on('finish', () => res.off('close', onClientClose));
 
-      // ---- Force lowest possible reasoning for Moonshot ----
+      // ---- Pass body as-is (No reasoning interference) ----
       if (req.body) {
-        // 1. Set reasoning_effort to 'low' (NIM's minimum for active reasoning)
-        req.body.reasoning_effort = 'low';
-
-        // 2. Explicitly enable thinking via chat_template_kwargs
-        req.body.chat_template_kwargs = req.body.chat_template_kwargs || {};
-        req.body.chat_template_kwargs.thinking = true;
-
+        // We simply stringify the body and send it exactly as JanitorAI made it.
         const bodyData = JSON.stringify(req.body);
-        console.log(`Request body size: ${bodyData.length} bytes (forced lowest reasoning)`);
+        console.log(`Request body size: ${bodyData.length} bytes (default reasoning)`);
+        
         proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
         proxyReq.write(bodyData);
         proxyReq.end();
