@@ -7,7 +7,9 @@ const app = express();
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
   next();
 });
 
@@ -20,6 +22,7 @@ const proxy = createProxyMiddleware({
     proxyReq: (proxyReq, req, res) => {
       console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
 
+      // Forward headers
       if (req.headers.authorization) {
         proxyReq.setHeader('Authorization', req.headers.authorization);
       }
@@ -27,7 +30,7 @@ const proxy = createProxyMiddleware({
         proxyReq.setHeader('Content-Type', req.headers['content-type']);
       }
 
-      // Client disconnect handling
+      // ---- Disconnect handling ----
       const onClientClose = () => {
         console.log('⚠️ Client disconnected, aborting upstream request');
         proxyReq.destroy();
@@ -35,50 +38,17 @@ const proxy = createProxyMiddleware({
       res.on('close', onClientClose);
       proxyReq.on('finish', () => res.off('close', onClientClose));
 
-      // ---- SANITIZE THINKING EFFORT FOR NIM ----
+      // ---- Force lowest possible thinking for Moonshot ----
       if (req.body) {
-        // 1. Remove any fields that NIM rejects
-        delete req.body.chat_template_kwargs;
-        delete req.body.thinking;
+        // 1. Set reasoning_effort to 'low' (NIM's minimum accepted value)
+        req.body.reasoning_effort = 'low';
 
-        // 2. Read the effort JanitorAI sent (it may be in different cases)
-        let incomingEffort = req.body.reasoning_effort;
-        if (typeof incomingEffort === 'string') {
-          incomingEffort = incomingEffort.toLowerCase().trim();
-        }
-
-        // 3. Map Janitor's values to NIM's accepted values
-        const effortMap = {
-          'off':         'none',
-          'minimal':     'low',
-          'low':         'low',
-          'medium':      'high',   // Kimi only has low/high/max
-          'extra high':  'max',
-          'extra_high':  'max',
-          'extra-high':  'max',
-          'max':         'max',
-          'high':        'high',
-          'none':        'none'
-        };
-
-        const mappedEffort = effortMap[incomingEffort] || null;
-
-        if (mappedEffort) {
-          if (mappedEffort === 'none') {
-            // Kimi always reasons; "none" is the lowest allowed
-            req.body.reasoning_effort = 'none';
-          } else {
-            req.body.reasoning_effort = mappedEffort;
-          }
-          console.log(`🎛️  Effort "${incomingEffort}" → sent as "${req.body.reasoning_effort}"`);
-        } else {
-          // No effort field from Janitor – let NIM use its default (max)
-          delete req.body.reasoning_effort;
-          console.log('ℹ️  No reasoning_effort sent – NIM will use its default');
-        }
+        // 2. Explicitly disable thinking via chat_template_kwargs (NIM specific)
+        req.body.chat_template_kwargs = req.body.chat_template_kwargs || {};
+        req.body.chat_template_kwargs.thinking = false;
 
         const bodyData = JSON.stringify(req.body);
-        console.log(`Request body size: ${bodyData.length} bytes`);
+        console.log(`Request body size: ${bodyData.length} bytes (forced lowest thinking)`);
         proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
         proxyReq.write(bodyData);
         proxyReq.end();
@@ -86,6 +56,7 @@ const proxy = createProxyMiddleware({
     },
     proxyRes: (proxyRes, req, res) => {
       console.log(`← Response status: ${proxyRes.statusCode}`);
+
       proxyRes.headers['access-control-allow-origin'] = '*';
       proxyRes.headers['access-control-allow-headers'] = 'Authorization, Content-Type';
 
@@ -105,7 +76,7 @@ const proxy = createProxyMiddleware({
   },
 });
 
-// IMPORTANT: Do NOT parse the body before the proxy.
+app.use(express.json({ limit: '5mb' }));
 app.get('/', (req, res) => res.send('Proxy OK'));
 app.use('/', proxy);
 
